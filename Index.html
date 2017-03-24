@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+  <meta charset="UTF-8">
+  <title>wdTable</title>
+  <link href="http://cdn.bootcss.com/bootstrap/4.0.0-alpha.2/css/bootstrap.min.css" rel="stylesheet">
+  <link href="luyeTable.less" rel="stylesheet" type="text/less">
+
+</head>
+<body>
+<div id="tb-div">hh</div>
+<div id="app"></div>
+<script src="http://cdn.bootcss.com/jquery/3.2.1/jquery.min.js"></script>
+<script src="http://cdn.bootcss.com/lodash.js/4.17.4/lodash.js"></script>
+<script src="http://cdn.bootcss.com/less.js/3.0.0-pre.4/less.min.js"></script>
+<script src="luyeTable.js"></script>
+<script src="data.js"></script>
+<script>
+
+  var tb = new LuyeTable({
+    el: $('#tb-div'),
+    data: data.res,
+    columns: [{cname: 'TEAM', cdata: 'tname'},
+      {cname: 'ID', cdata: 'tid'},
+      {cname: 'SCORE', cdata: 'tscore'},
+      {cname: 'FILES', cdata: 'file_count'},
+      {cname: 'CODE LINES', cdata: 'code_count'}]
+  });
+
+</script>
+
+</body>
+</html>
