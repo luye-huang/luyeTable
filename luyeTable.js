@@ -1,8 +1,6 @@
-/**
- * Created by luye on 2017/3/24.
- */
-// dependencies: jq, lodash
-// var http = require('../../../api.js');
+//dependencies: jq, lodash, bootstrap, fontawesome
+//lodash modules: map, find, filter, each, get, sortBy, ceil， isEmpty, cloneDeep, values, last
+//var http = require('../../../api.js');
 (function () {
   function LuyeTable(param) {
     this.initialize(param);
@@ -19,72 +17,67 @@
         dirtyCheck: false,
         pagination: true,
         pageCount: 20,
+        manageColumns: false
       };
       $.extend(this.param, param);
       this.initData();
       this.metadata = {
         processingData: _.cloneDeep(this.param.data),
-        processingColumns: _.map(this.param.columns, 'cdata'),
+        processingColumns: _.cloneDeep(this.param.columns),
         currentData: null,
         currentPage: 1,
         pageTotal: 0
       };
-      if(this.param.dirtyCheck){
+      if (this.param.dirtyCheck) {
         this.checkDirtyData(this.param.data, this.metadata.processingColumns);
       }
       this.regGlobalClick('.fa-snowflake-o', function (e) {
         $('.fa-snowflake-o').toggleClass('hide');
-      });
-      this.regGlobalClick('.fa-fw', function (e) {
-        // // var div = $('<div>hhhhhh</div>');
-        // // $('.fa-user-circle-o').after(div);
       });
       this.getCurrentData();
       if (!this.metadata.processingData) {
         alert('no data');
         return;
       }
+      this.adjustContainer();
       this.render();
     },
-    tpl: {
-      sp: $('<span></span>'),
-      dv: $('<div></div>')
-    },
-    regGlobalClick: (function () {
+    //自执行函数,随LuyeTable在初始化时执行
+    regGlobalClick: function () {
       var store = [];
+      console.trace();
       $('body').on('click', function (evt) {
         store = _.filter(store, function (config) {
           var elEl = config.element,
             handler = config.handler;
           if ($.contains(document.body, elEl.get(0))) {
-            //如果存在用户自定义动作handler，执行
             if (handler) {
               handler(evt);
-            } else { //否则默认行为是掩藏element
+            } else {
               elEl.hide();
             }
             return true;
           } else {
-            //filter掉不存在的dom
             return false;
           }
         });
       });
       return function (elSelector, handler) {
+        console.trace();
         store.push({
           "element": $(elSelector),
           "handler": handler
         });
       };
-    }()),
-    initData: function() {
-      if(this.param.url){
+    }(),
+    initData: function () {
+      if (this.param.url) {
 
       }
-      else if(this.param.data){
+      else if (this.param.data) {
 
       }
-      else{
+      else {
         this.param.data = res.res;
       }
     },
@@ -93,10 +86,10 @@
       var pageEnd = pageStart + this.param.pageCount;
       this.metadata.currentData = this.metadata.processingData.slice(pageStart, pageEnd);
     },
-    checkDirtyData: function(data, columns){
-      _.map(data, function(item){
+    checkDirtyData: function (data, columns) {
+      _.map(data, function (item) {
         var obj = {};
-        _.each(columns, function(column){
+        _.each(columns, function (column) {
           obj[column] = item[column];
         });
         return obj;
@@ -107,6 +100,10 @@
         this.metadata.processingData = _.cloneDeep(this.param.data);
       }
     },
+    adjustContainer: function () {
+      //for external export plugin
+      this.param.el.css({"position": "relative", "padding-top": "20px"});
+    },
     render: function () {
       var $table = this.wdtb = $('<table id="LuyeTable" class="table table-bordered table-hover table-striped"></table>');
       this.renderHead();
@@ -115,21 +112,33 @@
       if (this.param.pagination) {
         this.renderPages();
       }
+      this.renderHeadBoard();
     },
     renderHead: function () {
+      this.wdtb.find('thead').remove();
       var $head = $('<thead></thead>');
       var $tr = $('<tr></tr>');
-      var headNames = _.map(this.param.columns, 'cname');
-      _.each(headNames, function (headName) {
+      _.each(this.metadata.processingColumns, function (headName) {
         var $th = $('<th></th>');
-        $th.text(headName);
+        var $checkbox = $('<input type="checkbox" class="hide" checked="checked">');
         var $sort = $('<div><i class="fa fa-sort-asc"></i><i class="fa fa-sort-desc"></i></div>');
-        $th.append($sort);
+        $th.text(headName.cname).data('db', headName.cdata);
+        $th.append($checkbox).append($sort);
+        if (headName.hide) {
+          $th.addClass('hide');
+          $th.find('input').val('off').removeAttr('checked');
+        }
         $tr.append($th);
       });
       $head.append($tr);
       this.wdtb.append($head);
-      this.attachSortingEvents(this.wdtb);
+      this.attachSortingEvents();
+      this.attachColumnCheckedEvents();
+    },
+    renderHeadBoard: function () {
+      var $board = $('<div class="head-board"><button>列管理</button><button>重置</button></div>');
+      this.wdtb.before($board);
+      this.attachColumnManagementEvents();
     },
     renderBody: function () {
       this.wdtb.find('tbody').remove();
@@ -140,7 +149,35 @@
         var $tr = $('<tr></tr>');
         _.each(columns, function (col) {
           var $td = $('<td></td>');
-          $td.text(_.get(tr, col));
+          col.hide && $td.addClass('hide');
+          if (!col.type) {
+            $td.text(_.get(tr, col.cdata)).data('db', col.cdata);
+          }
+          else if (col.type == 'a') {
+            var rawUrl = col.url.split('@@');
+            var href = "";
+            for (var i = 0; i < col.params.length; i++) {
+              href += rawUrl[i];
+              href += tr[col.params[i]];
+            }
+            href += _.last(rawUrl);
+            console.log(href);
+            var $a = $('<a></a>').text(col.cname).attr('href', href);
+            $td.append($a);
+          }
+          if (col.style == 'fakeA') {
+            $td.addClass('fake-a');
+          }
+          else if (col.type == 'hide') {
+            $td.addClass('hide');
+          }
+          if (col.triggerClick) {
+            var paramArray = [];
+            _.each(col.callbackParam, function (param) {
+              paramArray.push(_.get(tr, param));
+            });
+            $td.on('click', paramArray, col.triggerClick);
+          }
           $tr.append($td);
         });
         $body.append($tr);
@@ -200,7 +237,6 @@
     attachSortingEvents: function () {
       var that = this;
       var metadata = that.metadata;
-      // $('i')不好使
       _.each(this.wdtb.find('thead i'), function (ele) {
         $(ele).click(function () {
           var $this = $(this);
@@ -255,8 +291,71 @@
         }
       });
     },
+    attachColumnCheckedEvents: function () {
+      this.wdtb.find('thead input').click(function () {
+        if ($(this).val() == "on") {
+          $(this).removeAttr('checked');
+          $(this).val('off');
+        }
+        else {
+          $(this).attr('checked', 'checked');
+          $(this).val('on');
+        }
+      });
+    },
+    attachColumnManagementEvents: function () {
+      var that = this;
+      $('.head-board>button').click(function () {
+        if (this.innerText == "列管理") {
+          $('thead input').removeClass('hide');
+          $(this).text('确定');
+        }
+        else if (this.innerText == "重置") {
+          $(this).prev().text('列管理');
+          that.resetColumns();
+        }
+        else if (this.innerText == "确定") {
+          _.each($('thead input'), function (item) {
+            console.log($(item).attr('checked'));
+            console.log($(item).val());
+          });
+          for (var i = 0; i < that.metadata.processingColumns.length; i++) {
+            var val = $($('thead input')[i]).val();
+            if (val == 'on') {
+              that.metadata.processingColumns[i].hide = false;
+            }
+            else {
+              that.metadata.processingColumns[i].hide = true;
+            }
+          }
+          $(this).text('列管理');
+          $(this).next().text('重置');
+          that.renderHead();
+          that.renderBody();
+        }
+        //checkbox 大坑  ng-check?
+        // else if (this.innerText == "取消") {
+        //   for(var i =0; i<that.metadata.processingColumns.length; i++){
+        //     if(that.metadata.processingColumns[i].hide){
+        //       $($('thead input')[i]).val('off').removeAttr('checked');
+        //     }
+        //     else{
+        //       $($('thead input')[i]).val('on').attr('checked','checked');
+        //     }
+        //   }
+        //   $('thead input').addClass('hide');
+        //   $(this).text('重置');
+        //   $(this).prev().text('列管理');
+        // }
+      });
+    },
     resetSortingArrows: function () {
       this.wdtb.find('thead i.invisible').toggleClass('invisible');
+    },
+    resetColumns: function () {
+      this.metadata.processingColumns = _.cloneDeep(this.param.columns);
+      this.renderHead();
+      this.renderBody();
     },
     query: function (queryParams) {
       var that = this;
@@ -291,6 +390,13 @@
             });
             break;
         }
+      });
+      this.refresh();
+    },
+    queryAll: function (keyword) {
+      this.resetData();
+      this.metadata.processingData = _.filter(this.metadata.processingData, function (item) {
+        return _.values(item).join(',').indexOf(keyword) != -1;
       });
       this.refresh();
     },
