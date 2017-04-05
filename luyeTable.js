@@ -1,6 +1,5 @@
-//dependencies: jq, lodash, bootstrap, fontawesome
+//dependencies: jq, lodash
 //lodash modules: map, find, filter, each, get, sortBy, ceil， isEmpty, cloneDeep, values, last
-//var http = require('../../../api.js');
 (function () {
   function LuyeTable(param) {
     this.initialize(param);
@@ -15,9 +14,13 @@
         columns: null,
         // optional
         dirtyCheck: false,
+        export: true,
         pagination: true,
         pageCount: 20,
-        manageColumns: false
+        globalSearch: true,
+        manageColumns: false,
+        //initial value lost at first evaluation
+        managePageSize: true
       };
       $.extend(this.param, param);
       this.initData();
@@ -31,9 +34,6 @@
       if (this.param.dirtyCheck) {
         this.checkDirtyData(this.param.data, this.metadata.processingColumns);
       }
-      this.regGlobalClick('.fa-snowflake-o', function (e) {
-        $('.fa-snowflake-o').toggleClass('hide');
-      });
       this.getCurrentData();
       if (!this.metadata.processingData) {
         alert('no data');
@@ -78,7 +78,7 @@
 
       }
       else {
-        this.param.data = res.res;
+        // this.param.data = res.res;
       }
     },
     getCurrentData: function () {
@@ -86,6 +86,7 @@
       var pageEnd = pageStart + this.param.pageCount;
       this.metadata.currentData = this.metadata.processingData.slice(pageStart, pageEnd);
     },
+    //in case that provided data has more attributes than the table needs
     checkDirtyData: function (data, columns) {
       _.map(data, function (item) {
         var obj = {};
@@ -95,24 +96,25 @@
         return obj;
       });
     },
+    //reset to initial data
     resetData: function () {
       if (this.param.data) {
+        this.metadata.currentPage = 1;
         this.metadata.processingData = _.cloneDeep(this.param.data);
       }
     },
+    //create room for a set of controls like export button, cross-table query input
     adjustContainer: function () {
-      //for external export plugin
       this.param.el.css({"position": "relative", "padding-top": "20px"});
     },
     render: function () {
-      var $table = this.wdtb = $('<table id="LuyeTable" class="table table-bordered table-hover table-striped"></table>');
+      var $table = this.wdtb = $('<table id="LuyeTable"></table>');
       this.renderHead();
       this.renderBody();
       this.param.el.html($table);
-      if (this.param.pagination) {
-        this.renderPages();
-      }
-      this.renderHeadBoard();
+      this.param.pagination && this.renderPages();
+      this.param.managePageSize && this.renderLeftBoard();
+      this.renderRightBoard();
     },
     renderHead: function () {
       this.wdtb.find('thead').remove();
@@ -121,10 +123,10 @@
       _.each(this.metadata.processingColumns, function (headName) {
         var $th = $('<th></th>');
         var $checkbox = $('<input type="checkbox" class="hide" checked="checked">');
-        var $sort = $('<div><i class="fa fa-sort-asc"></i><i class="fa fa-sort-desc"></i></div>');
+        var $sort = $('<div><div class="tangle-up arrows"></div><div class="tangle-down arrows"></div></div>');
         $th.text(headName.cname).data('db', headName.cdata);
         $th.append($checkbox).append($sort);
-        if (headName.hide) {
+        if (headName.style == 'hide') {
           $th.addClass('hide');
           $th.find('input').val('off').removeAttr('checked');
         }
@@ -135,12 +137,25 @@
       this.attachSortingEvents();
       this.attachColumnCheckedEvents();
     },
-    renderHeadBoard: function () {
-      var $board = $('<div class="head-board"><button>列管理</button><button>重置</button></div>');
+    renderLeftBoard: function () {
+      var that = this;
+      var $board = $('<div class="left-board"></div>');
+      $board.append('<label>每页数: </label>')
+        .append('<select class="selectpicker showtick" ><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="50">50</option></select>');
+      $board.find('select').val(this.param.pageCount);
       this.wdtb.before($board);
-      this.attachColumnManagementEvents();
+      this.attachPageSizeEvent();
     },
-    renderBody: function () {
+    renderRightBoard: function () {
+      var $board = $('<div class="right-board"><button class="column-management">列管理</button><button class="column-management">重置</button></div>');
+      this.param.export && $board.prepend('<input id="global-search" placeholder="全局关键字查询"/>');
+      this.param.globalSearch && $board.append('<button id = "export-btn">导出</button>');
+      this.wdtb.before($board);
+      this.attachGlobalSearchEvent();
+      this.attachColumnManagementEvents();
+      this.attachExportEvent();
+    },
+    renderBody: function (keywords) {
       this.wdtb.find('tbody').remove();
       var $body = $('<tbody></tbody>');
       var columns = this.metadata.processingColumns;
@@ -149,9 +164,15 @@
         var $tr = $('<tr></tr>');
         _.each(columns, function (col) {
           var $td = $('<td></td>');
-          col.hide && $td.addClass('hide');
           if (!col.type) {
-            $td.text(_.get(tr, col.cdata)).data('db', col.cdata);
+            var txt = _.get(tr, col.cdata) + "";
+            keywords && _.each(keywords, function (keyword) {
+              if (txt.indexOf(keyword) != -1) {
+                var yellowstr = '<span class="yellowed">' + keyword + '</span>';
+                txt = txt.replace(keyword, yellowstr);
+              }
+            });
+            $td.html(txt).data('db', col.cdata);
           }
           else if (col.type == 'a') {
             var rawUrl = col.url.split('@@');
@@ -168,15 +189,16 @@
           if (col.style == 'fakeA') {
             $td.addClass('fake-a');
           }
-          else if (col.type == 'hide') {
+          else if (col.style == 'hide') {
             $td.addClass('hide');
           }
-          if (col.triggerClick) {
-            var paramArray = [];
-            _.each(col.callbackParam, function (param) {
-              paramArray.push(_.get(tr, param));
-            });
-            $td.on('click', paramArray, col.triggerClick);
+          if (col.action) {
+            // tr.columnName = col.cname;
+            $td.on(col.action, tr, col.trigger).attr('columnName', col.cname);
+            // (function (data) {
+            //   console.log(data);
+            //   $td.on(col.action, data, col.trigger);
+            // })(tr);
           }
           $tr.append($td);
         });
@@ -234,10 +256,17 @@
         params.el.find('.page-info-error').addClass('hide');
       }
     },
+    attachPageSizeEvent: function () {
+      var that = this;
+      $('.left-board select').change(function () {
+        that.param.pageCount = parseInt($(this).val());
+        that.refresh();
+      });
+    },
     attachSortingEvents: function () {
       var that = this;
       var metadata = that.metadata;
-      _.each(this.wdtb.find('thead i'), function (ele) {
+      _.each(this.wdtb.find('thead .arrows'), function (ele) {
         $(ele).click(function () {
           var $this = $(this);
           if ($this.hasClass('invisible')) {
@@ -247,7 +276,7 @@
           var sortParam = _.find(that.param.columns, function (item) {
             return item.cname == colTxt;
           });
-          if ($this.hasClass('fa-sort-asc')) {
+          if ($this.hasClass('tangle-up')) {
             metadata.processingData = _.sortBy(metadata.processingData, sortParam.cdata);
           } else {
             metadata.processingData = _.sortBy(metadata.processingData, sortParam.cdata).reverse();
@@ -291,6 +320,21 @@
         }
       });
     },
+    attachGlobalSearchEvent: function () {
+      var that = this;
+      $('.right-board>input').keydown(function () {
+        if (event.keyCode == 13) {
+          var keyword = $(this).val();
+          if (keyword === '') {
+            that.resetData();
+            that.refresh();
+          }
+          else {
+            that.queryAll(keyword);
+          }
+        }
+      });
+    },
     attachColumnCheckedEvents: function () {
       this.wdtb.find('thead input').click(function () {
         if ($(this).val() == "on") {
@@ -305,7 +349,7 @@
     },
     attachColumnManagementEvents: function () {
       var that = this;
-      $('.head-board>button').click(function () {
+      $('.right-board>button.column-management').click(function () {
         if (this.innerText == "列管理") {
           $('thead input').removeClass('hide');
           $(this).text('确定');
@@ -315,17 +359,13 @@
           that.resetColumns();
         }
         else if (this.innerText == "确定") {
-          _.each($('thead input'), function (item) {
-            console.log($(item).attr('checked'));
-            console.log($(item).val());
-          });
           for (var i = 0; i < that.metadata.processingColumns.length; i++) {
             var val = $($('thead input')[i]).val();
             if (val == 'on') {
-              that.metadata.processingColumns[i].hide = false;
+              that.metadata.processingColumns[i].style = "";
             }
             else {
-              that.metadata.processingColumns[i].hide = true;
+              that.metadata.processingColumns[i].style = "hide";
             }
           }
           $(this).text('列管理');
@@ -333,24 +373,36 @@
           that.renderHead();
           that.renderBody();
         }
-        //checkbox 大坑  ng-check?
-        // else if (this.innerText == "取消") {
-        //   for(var i =0; i<that.metadata.processingColumns.length; i++){
-        //     if(that.metadata.processingColumns[i].hide){
-        //       $($('thead input')[i]).val('off').removeAttr('checked');
-        //     }
-        //     else{
-        //       $($('thead input')[i]).val('on').attr('checked','checked');
-        //     }
-        //   }
-        //   $('thead input').addClass('hide');
-        //   $(this).text('重置');
-        //   $(this).prev().text('列管理');
-        // }
+      });
+    },
+    // dependencies: bolb FileSaver.js
+    // inefficient, consider twice before using this function
+    attachExportEvent: function () {
+      var that = this;
+      var columns = that.metadata.processingColumns;
+      var data = that.metadata.processingData;
+      $('#export-btn').click(function () {
+        var exportedData = [];
+        _.each(data, function (row) {
+          var arr = [];
+          for (var i = 0; i < columns.length; i++) {
+            var str = _.get(row, columns[i].cdata) + "";
+            if (str.indexOf(',') != -1) {
+              str = str.split(',').join('，');
+            }
+            arr.push(str);
+            if (i == columns.length - 1) {
+              exportedData.push(arr + '\n')
+            }
+          }
+        })
+        exportedData.unshift(_.map(columns, 'cname') + '\n');
+        var blob = new Blob(exportedData, {type: "text/plain;charset=utf-8"});
+        saveAs(blob, "download.csv");
       });
     },
     resetSortingArrows: function () {
-      this.wdtb.find('thead i.invisible').toggleClass('invisible');
+      this.wdtb.find('thead .arrows.invisible').toggleClass('invisible');
     },
     resetColumns: function () {
       this.metadata.processingColumns = _.cloneDeep(this.param.columns);
@@ -361,11 +413,13 @@
       var that = this;
       this.resetData();
       var metadata = that.metadata;
+      var yellowed = [];
       queryParams = _.sortBy(queryParams, 'predicate');
       _.each(queryParams, function (queryParam) {
         switch (queryParam.predicate) {
           case "eq":
             metadata.processingData = _.filter(metadata.processingData, function (item) {
+              yellowed.push(queryParam.arg1);
               return item[queryParam.queryCol] == queryParam.arg1;
             });
             break;
@@ -386,27 +440,26 @@
             break;
           case "zkw":
             metadata.processingData = _.filter(metadata.processingData, function (item) {
+              yellowed.push(queryParam.arg1);
               return item[queryParam.queryCol].indexOf(queryParam.arg1) != -1;
             });
             break;
         }
       });
-      this.refresh();
+      this.refresh(yellowed);
     },
     queryAll: function (keyword) {
       this.resetData();
       this.metadata.processingData = _.filter(this.metadata.processingData, function (item) {
-        return _.values(item).join(',').indexOf(keyword) != -1;
+        return _.values(item).join('`~``').indexOf(keyword) != -1;
       });
-      this.refresh();
+      this.refresh([keyword]);
     },
-    refresh: function () {
+    refresh: function (keywords) {
       this.getCurrentData();
       this.resetSortingArrows();
-      this.renderBody();
-      if (this.param.pagination) {
-        this.renderPages();
-      }
+      this.renderBody(keywords);
+      this.param.pagination && this.renderPages();
     },
     destroy: function () {
       this.param.el.empty();
