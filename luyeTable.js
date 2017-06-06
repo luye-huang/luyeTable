@@ -108,10 +108,10 @@
       this.param.el.css({"position": "relative", "padding-top": "20px"});
     },
     render: function () {
-      var $table = this.wdtb = $('<table id="LuyeTable"></table>');
+      this.wdtb = $('<table id="LuyeTable"></table>');
       this.renderHead();
       this.renderBody();
-      this.param.el.html($table);
+      this.param.el.html(this.wdtb);
       this.param.pagination && this.renderPages();
       this.param.managePageSize && this.renderLeftBoard();
       this.renderRightBoard();
@@ -138,7 +138,6 @@
       this.attachColumnCheckedEvents();
     },
     renderLeftBoard: function () {
-      var that = this;
       var $board = $('<div class="left-board"></div>');
       $board.append('<label>每页数: </label>')
         .append('<select class="selectpicker showtick" ><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="50">50</option></select>');
@@ -161,7 +160,8 @@
       var columns = this.metadata.processingColumns;
       console.time('start');
       _.each(this.metadata.currentData, function (tr) {
-        var $tr = $('<tr></tr>');
+        var $tr = $('<tr></tr>').data('rowData', tr);
+        // $tr.data('rowData', tr);
         _.each(columns, function (col) {
           var $td = $('<td></td>');
           if (!col.type) {
@@ -182,9 +182,15 @@
               href += tr[col.params[i]];
             }
             href += _.last(rawUrl);
-            console.log(href);
-            var $a = $('<a></a>').text(col.cname).attr('href', href);
+            var aContent = col.cdata ? tr[col.cdata] : col.cname;
+            var $a = $('<a></a>').text(aContent).attr('href', href);
             $td.append($a);
+          }
+          else if (col.type === 'management') {
+            const that = this;
+            // that.param.management = true;
+            $td.addClass('row-management').append('<button class="row-view">查看</button><button class="row-edit">编辑</button><button class="row-delete">删除</button>');
+            // $td.delegate(that.attachRowManagementEvents);
           }
           if (col.style == 'fakeA') {
             $td.addClass('fake-a');
@@ -206,6 +212,7 @@
       });
       console.timeEnd('end');
       this.wdtb.append($body);
+      this.delegateRowManagementEvents();
     },
     renderPages: function () {
       var params = this.param;
@@ -256,10 +263,70 @@
         params.el.find('.page-info-error').addClass('hide');
       }
     },
+    delegateRowManagementEvents: function () {
+      var that = this;
+      this.wdtb.delegate('.row-view', 'click', function () {
+        $('.detail-modal').remove();
+        const $this = $(this);
+        const data = $this.closest('tr').data('rowData');
+        const $modal = $('<div class="detail-modal">查看<div class="modal-contents"></div><div class="bottom-row"><button class="modal-close">关闭</button></div></div>');
+        that.wdtb.append($modal);
+        that.metadata.processingColumns.forEach(function (item) {
+          if (!item.type) {
+            var $span = $('<span></span>').text(item.cname);
+            var $input = $('<input readonly />').val(data[item.cdata]);
+            var $div = $('<div></div>');
+            $div.append($span).append($input);
+            $modal.find('.modal-contents').append($div);
+          }
+        });
+      }).delegate('.row-edit', 'click', function () {
+        $('.detail-modal').remove();
+        var $this = $(this);
+        var $tr = $this.closest('tr');
+        var data = $tr.data('rowData');
+        var $modal = $('<div class="detail-modal">编辑<div class="modal-contents"></div><div class="bottom-row"><button class="modal-edit">确定</button><button class="modal-close">关闭</button></div></div>');
+        $modal.find('.modal-edit').data('row', $this.closest('tr'));
+        that.wdtb.append($modal);
+        //to edit edited values
+        var changedTd = Array.from($tr.children()).filter(function (td) {
+          return td.hasAttribute('data-index')
+        });
+        that.metadata.processingColumns.forEach(function (item, index) {
+          if (!item.type) {
+            console.log(changedTd[index]);
+            var $div = $('<div></div>');
+            var $span = $('<span>'+item.cname+'</span>');
+            var val = changedTd[index] === undefined ? data[item.cdata] : changedTd[index].innerHTML;
+            var $input = $('<input/>').attr('index', index).val(val);
+            $div.append($span).append($input);
+            $modal.find('.modal-contents').append($div);
+            $tr.children()[index].dataset.index = index;
+          }
+        });
+      }).delegate('.row-delete', 'click', function () {
+        that.param.handlerDelete && that.param.handlerDelete($(this).closest('tr').data('rowData'));
+        $(this).closest('tr').remove();
+      }).delegate('.modal-edit', 'click', function () {
+        var row = $(this).data('row');
+        var inputs = $(this).closest('.detail-modal').find('input');
+        Array.from(row.children(), function (td) {
+          if (td.dataset.index !== undefined) {
+            td.innerHTML = inputs[td.dataset.index].value;
+          }
+        });
+        that.param.handlerEdit && that.param.handlerEdit($(this).data('data'));
+        $(this).closest('.detail-modal').remove();
+      }).delegate('.modal-close', 'click', function () {
+        $(this).closest('.detail-modal').remove();
+      });
+    },
     attachPageSizeEvent: function () {
       var that = this;
       $('.left-board select').change(function () {
         that.param.pageCount = parseInt($(this).val());
+        that.metadata.pageTotal = _.ceil(that.metadata.processingData.length / param.pageCount);
+        that.metadata.currentPage = that.metadata.currentPage > that.metadata.pageTotal ? that.metadata.pageTotal : that.metadata.currentPage;
         that.refresh();
       });
     },
@@ -322,15 +389,21 @@
     },
     attachGlobalSearchEvent: function () {
       var that = this;
-      $('.right-board>input').keydown(function () {
+      $('.right-board>input').keyup(function () {
+        var keyword = $(this).val();
         if (event.keyCode == 13) {
-          var keyword = $(this).val();
           if (keyword === '') {
             that.resetData();
             that.refresh();
           }
           else {
             that.queryAll(keyword);
+          }
+        }
+        else if (event.keyCode == 8) {
+          if (keyword === '') {
+            that.resetData();
+            that.refresh();
           }
         }
       });
@@ -368,8 +441,7 @@
               that.metadata.processingColumns[i].style = "hide";
             }
           }
-          $(this).text('列管理');
-          $(this).next().text('重置');
+          $(this).text('列管理').next().text('重置');
           that.renderHead();
           that.renderBody();
         }
@@ -378,9 +450,8 @@
     // dependencies: bolb FileSaver.js
     // inefficient, consider twice before using this function
     attachExportEvent: function () {
-      var that = this;
-      var columns = that.metadata.processingColumns;
-      var data = that.metadata.processingData;
+      var columns = this.metadata.processingColumns;
+      var data = this.metadata.processingData;
       $('#export-btn').click(function () {
         var exportedData = [];
         _.each(data, function (row) {
@@ -416,10 +487,10 @@
       var yellowed = [];
       queryParams = _.sortBy(queryParams, 'predicate');
       _.each(queryParams, function (queryParam) {
+        if (!yellowed.includes(queryParam.arg1))yellowed.push(queryParam.arg1);
         switch (queryParam.predicate) {
           case "eq":
             metadata.processingData = _.filter(metadata.processingData, function (item) {
-              yellowed.push(queryParam.arg1);
               return item[queryParam.queryCol] == queryParam.arg1;
             });
             break;
@@ -440,7 +511,6 @@
             break;
           case "zkw":
             metadata.processingData = _.filter(metadata.processingData, function (item) {
-              yellowed.push(queryParam.arg1);
               return item[queryParam.queryCol].indexOf(queryParam.arg1) != -1;
             });
             break;
